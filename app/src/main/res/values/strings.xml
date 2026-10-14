@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Pull Up</string>
+    <!-- 播放通知渠道名（原版 PlaybackService.java 的 CHANNEL_NAME =「播放控制」）。 -->
+    <string name="playback_channel_name">播放控制</string>
+</resources>

@@ -1,0 +1,17 @@
+# 统一换行：仓库内存 LF，避免 gradlew（shell 脚本）在 Linux/macOS 上被 CRLF 弄坏。
+* text=auto eol=lf
+
+# Windows 批处理必须保留 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制，不做任何换行转换
+*.jar binary
+*.png binary
+*.jpg binary
+*.ttf binary
+*.otf binary
+*.jks binary
+*.keystore binary
+*.apk binary
+*.dex binary
