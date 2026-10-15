@@ -1,6 +1,6 @@
 # Pull Up · Android
 
-一款由 AI 辅助开发的**轻量化、无服务器、纯代码** Android 音乐播放器。
+一款由 AI 辅助开发的**轻量化、无服务器、纯代码** Android 音乐播放器。（部分功能未实现，存在一些BUG）
 
 > 原为 Godot 4.7 概念版（Pulse），现 100% 重构为原生 Android 工程：Kotlin + Jetpack Compose + Media3，零 XML 布局、零 Godot 依赖。APK 约 12.8 MB（R8 压缩 + v2 签名）。
 
@@ -46,8 +46,10 @@ cd pull-up-android
 ## 已知缺口
 
 - 本地音乐导入待改走 SAF（Android 无原版 FileDialog）
+- API调用逻辑问题，部分VIP音乐只能试听
 - 搜索历史目前仅存内存，重启即丢
 - 部分机型播放页打开异常待真机 logcat 定位
+- 播放音乐时闪退，无播放页面（该问题较严重）
 
 ## 许可证
 
