@@ -53,31 +53,36 @@ interface Shell {
     fun openEditor()
 
     /**
-     * 新建歌单，且**建好后把这句 [song] 放进去**（原版 `ActionSheet.gd:248-258` 的
-     * `_pending_add_after_create`）。首页那条「新建歌单」入口没有待加入的歌，走 [openEditor]。
+     * 播放队列页（原版 `MainUI.gd:711-718 open_queue()` → `QueueScreen.gd`）。
+     *
+     * **「播放列表」＝正在播放的队列**，不是首页那些自建歌单 —— 用户 m06483/m06486
+     * 的原话就是「播放列表在哪？」。入口有两处：播放页进度行右端的队列钮、
+     * 详情页贴底条「播放列表 · N 首 ›」（原版 `UIFactory._build_detail_bar()`）。
      */
-    fun openEditorFor(song: Track)
+    fun openQueue()
 
     /** 歌曲操作面板（长按歌曲行）。 */
     fun showSongActions(song: Track)
 
     /**
-     * 歌曲行右侧的「+」：选一个歌单把这首加进去，**加完就把该歌单排成队列、从这首开始放**，
-     * 并沿用当前播放模式（不重置随机/单曲/列表）。
+     * 歌曲行右侧的「+」：**把这一首追加到当前播放队列末尾，不打断当前播放**
+     * （`AddToQueue.gd:133 add()` → `PlayerManager.gd:344 add_to_queue()`）。
      *
-     * 为什么不复用 [showSongActions]：那条路是「长按 → 二级面板 → 添加」，加完就收工，
-     * 不会起播；用户要的是「加进去并且立刻照当前模式听起来」。
+     * 「播放列表」＝**正在播放的队列**（`PlayerManager.playlist`），不是 `Playlists` 里的
+     * 自建歌单 —— 后者另走长按菜单。行为由用户当面选定：当前这首继续播，轮到新加的那首时
+     * 走向（随机 / 单曲循环 / 列表循环 / 单次）一律交给播放器现成的逻辑，这里不自己实现。
+     *
+     * 加完会弹一条短提示：`已加入播放列表` / `播放列表里已经有了` / `本地歌曲加不进去`。
      */
-    fun addToPlaylist(song: Track)
+    fun addToQueue(song: Track)
 
     /**
-     * 歌曲行右侧「+」的**播放列表**入口（用户 m05292 项⑤⑥）：选一个可保存的待播队列，
-     * 把歌放进去并**立刻按当前播放模式起播**（沿用随机/单曲/列表，不重置）。
+     * 底部短提示浮层（原版 `AddToQueue.gd` 的 `AddToQueueToast`）。
      *
-     * 与 [addToPlaylist] 的分工：那边进的是**歌单**（收藏夹，加完只存着）；
-     * 这里进的是**播放列表**（队列，加完接着放）。
+     * [accent] ＝ true 用强调色（成功），false 用次要文字色（中性提示）。
+     * 1.6 秒后自己消失，同屏只留一条。
      */
-    fun addToQueueList(song: Track)
+    fun showToast(text: String, accent: Boolean = false)
 
     /** 「页面被吃了」页：密码连错三次时弹。 */
     fun openEaten()

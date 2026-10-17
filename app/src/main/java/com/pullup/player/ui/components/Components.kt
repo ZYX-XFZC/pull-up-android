@@ -9,6 +9,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -34,6 +37,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -41,6 +45,9 @@ import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -51,11 +58,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.pullup.player.data.Track
+import com.pullup.player.ui.LocalApp
 import com.pullup.player.ui.theme.Dims
 import com.pullup.player.ui.theme.PullTheme
 import com.pullup.player.ui.theme.Typo
+import com.pullup.player.ui.theme.rememberPressScale
 import kotlin.math.abs
 import kotlin.math.sin
 
@@ -67,8 +77,51 @@ import kotlin.math.sin
  * - **胶囊只留给播放键**，按钮一律圆角矩形（用户明确嫌弃过「超绝大圆角」）。
  */
 
-/** 歌曲行圆角（原版 `UIFactory.gd:151` `ROW_RADIUS := 32` ⇒ 32÷2.5 = 12.8dp）。 */
+/** 空态盘里图标的占比（原版 `IconView.gd:24` 的 `ratio = 0.52`）。 */
+private const val EMPTY_ICON_RATIO = 0.52f
+
+/** 歌曲行圆角（原版 `UIFactory.gd:172` `ROW_RADIUS := 32` ⇒ 32÷2.5 = 12.8dp）。 */
 private const val ROW_RADIUS_DP = 12.8f
+
+/**
+ * 歌曲行**封面**的圆角（原版 `UIFactory.gd:171` `ART_RADIUS := 10` ⇒ 10÷2.5 = 4dp）。
+ *
+ * 别拿 [Dims.RADIUS_SMALL] 套：那是行本身的 32px。原版注释写得很直白——
+ * 「参考原型的行封面 42px 用 6dp，等比到我们约 17px，但 20/22px 太胖、还会「咬」进
+ * 封面内容（用户两次反馈偏圆），所以定在 10（≈8%）」。48dp 见方的图吃 13dp 圆角
+ * 几乎就成了圆形，和原版观感差得最远的一处就在这。
+ */
+private const val ROW_ART_RADIUS_DP = 4f
+
+/** 行内元素间距（原版 `UIFactory.gd:905` HBox `separation = 24` ⇒ 24÷2.5 = 9.6dp）。 */
+private const val ROW_GAP_DP = 9.6f
+
+/** 行内两行文字的行距（原版 `UIFactory.gd:923` VBox `separation = 8` ⇒ 8÷2.5 = 3.2dp）。 */
+private const val ROW_TEXT_GAP_DP = 3.2f
+
+/** 行左右内边距（原版 `UIFactory.gd:900` `_full_rect_margin(14)` ⇒ 14÷2.5 = 5.6dp）。 */
+private const val ROW_PAD_H_DP = 5.6f
+
+/** 行上下内边距：行高 160px 减封面 120px 再对半 ⇒ 20px÷2.5 = 8dp（`UIFactory.gd:156-157`）。 */
+private const val ROW_PAD_V_DP = 8f
+
+/** 歌名字号（原版 `UIFactory.gd:926` 用 `FONT_BODY = 42px` ⇒ 42÷2.5 = 16.8sp）。 */
+private const val ROW_TITLE_SP = 16.8f
+
+/** 歌手·专辑字号（原版 `UIFactory.gd:929` 用 `FONT_SUB = 32px` ⇒ 32÷2.5 = 12.8sp）。 */
+private const val ROW_SUB_SP = 12.8f
+
+/** 时长字号（原版 `UIFactory.gd:932` 用 `FONT_META = 28px` ⇒ 28÷2.5 = 11.2sp）。 */
+private const val ROW_META_SP = 11.2f
+
+/** 在播音条边长（原版 `UIFactory.gd:914` 名义 34px，被 `PlayingBars.gd:30` 的 `custom_minimum_size = 46` 钳到 46px ⇒ 46÷2.5 = 18.4dp）。 */
+private const val ROW_BARS_DP = 18.4f
+
+/** 音条横向外露：`UIFactory.gd:915` 的 x 起点 94px 相对封面右沿 134px ⇒ 外露 6px÷2.5 = 2.4dp。 */
+private const val ROW_BARS_OVERHANG_X_DP = 2.4f
+
+/** 音条纵向外露：`UIFactory.gd:915` 的 y 起点 12px 相对封面顶沿 20px ⇒ 外露 8px÷2.5 = 3.2dp。 */
+private const val ROW_BARS_OVERHANG_Y_DP = 3.2f
 
 /** 节标题右侧小标圆角（原版 `AppTheme.gd:596` `chip_box` 的 radius 24 ⇒ 24÷2.5 = 9.6dp）。 */
 private const val SECTION_CHIP_RADIUS_DP = 9.6f
@@ -105,7 +158,12 @@ fun SectionHeader(title: String, hint: String = "", trailing: @Composable (() ->
             color = c.text,
             fontSize = Typo.BODY.sp,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f, fill = false),
+            // 标题必须**撑满**：原版 `UIFactory.gd:779` 给标题设的是
+            // `size_flags_horizontal = Control.SIZE_EXPAND_FILL`，于是右侧小标/链接被顶到
+            // 最右端，整行是「左标题 · 右小标」的分栏。
+            // 早先写成 `weight(1f, fill = false)`，标题只占自身宽度 ⇒ 小标紧贴标题、
+            // 右半边空一片，搜索/音乐库/设置三页的小节头全都错位。
+            modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(10.dp))
         if (hint.isNotEmpty()) {
@@ -183,7 +241,14 @@ fun EmptyState(
             contentAlignment = Alignment.Center,
         ) {
             if (icon.isNotEmpty()) {
-                IconAsset(name = icon, color = c.accent, modifier = Modifier.fillMaxSize())
+                // 图标只占盘子的 52%：原版 `IconView.gd:24,32` 的 `ratio = 0.52`
+                // （`side = minf(size) * ratio`）。早先 `fillMaxSize()` 让图形铺满 72dp，
+                // 视觉上比原版的 ~37dp 大了近一倍，把小标题和说明都压过去了。
+                IconAsset(
+                    name = icon,
+                    color = c.accent,
+                    modifier = Modifier.size(72.dp * EMPTY_ICON_RATIO),
+                )
             }
         }
         if (title.isNotEmpty()) {
@@ -252,9 +317,12 @@ fun ActionButton(
  * （`transparent_box`，原版注释：「Rows are invisible until touched: the list reads as
  * content, not as a stack of boxes.」）。
  *
- * [onAdd] 非空时在时长右侧多画一颗「+」——点它把这首歌加进**播放列表**并按当前模式起播
- * （用户 m05292 项⑤⑥「每首歌后面加号→加入播放列表→按当前模式播放」）。它是**兄弟节点
- * 而不是覆盖层**，所以点「+」不会连带触发整行的 [onClick]（行本身是「播放这首」）。
+ * [onAdd] 非空时在时长右侧多画一颗「+」——点它把这首歌**追加到当前播放队列末尾、不打断当前播放**
+ * （原版 `AddToQueue.gd:133 add()` → `PlayerManager.gd:344 add_to_queue()`，用户 m06166 当面选定）。
+ * 它是**兄弟节点而不是覆盖层**，所以点「+」不会连带触发整行的 [onClick]（行本身是「播放这首」）。
+ *
+ * 本地曲目（负数 id）不画这颗「+」：原版 `UIFactory.gd:193` 只在 `int(song.id) > 0` 时才挂，
+ * 因为队列里的歌要能被接口解析出流地址，本地文件给不出。
  */
 @Composable
 fun SongRow(
@@ -265,58 +333,97 @@ fun SongRow(
     onAdd: (() -> Unit)? = null,
 ) {
     val c = PullTheme.colors
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(ROW_RADIUS_DP.dp))
-            .background(if (playing) c.accentDim else Color.Transparent)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 6.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // 封面右上角叠音条（原版 `_make_row` 里 bars 是 button 的子节点、压在封面角上）。
-        Box {
-            Cover(url = track.cover, size = 48)
-            if (playing) {
-                PlayingBars(
-                    color = c.accent,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(3.dp)
-                        .size(16.dp),
+    // ---- 触摸阈值（原版 `scripts/ui/SongRow.gd:20-22`）----
+    // 原版直接写了两个常量，Kotlin 侧 `combinedClickable` 吃的是 `ViewConfiguration` 的默认值
+    // （长按≈500ms、触摸容差≈8dp），两个都对不上。这里只替换这一行范围内的 ViewConfiguration，
+    // 保住 combinedClickable 自带的「松手才触发」、涟漪、无障碍语义（手写 pointerInput 会全丢）。
+    //
+    // - `HOLD_SECONDS := 0.45` → 长按 450 毫秒
+    // - `TAP_SLOP := 26.0` px ÷ 2.5 = **10.4dp** → 松手时位移超过它就说明用户在滑动，
+    //   这次触摸作废（原版 `is_tap()`，`:80-81`）。同时 `_process()` 里还有一条
+    //   （`SongRow.gd:54-59`，用户 m01636 提的坑）：手指一旦离开按下点超过 TAP_SLOP
+    //   就**立刻取消长按计时**，否则「按住封面往下滑想滚列表」也会在 0.45 秒后弹面板。
+    //   `combinedClickable` 内部按 touchSlop 判定拖动、跳出长按检测，语义等价。
+    val base = LocalViewConfiguration.current
+    val density = LocalDensity.current
+    val touchConfig = remember(base, density) {
+        object : ViewConfiguration by base {
+            override val longPressTimeoutMillis: Long = SONG_ROW_HOLD_MS
+            override val touchSlop: Float = SONG_ROW_SLOP_DP * density.density
+        }
+    }
+    CompositionLocalProvider(LocalViewConfiguration provides touchConfig) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(ROW_RADIUS_DP.dp))
+                .background(if (playing) c.accentDim else Color.Transparent)
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                .padding(horizontal = ROW_PAD_H_DP.dp, vertical = ROW_PAD_V_DP.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 封面右上角叠音条（原版 `UIFactory.gd:911-916`：bars 是 button 的兄弟节点，
+            // 位置 `Vector2(14 + art_size - 40, 12)` —— 横向上比封面右沿外露 6px，
+            // 纵向上比封面顶沿外露 8px，看着是「骑」在右上角而不是压在封面里）。
+            Box {
+                Cover(url = track.cover, size = 48, corner = ROW_ART_RADIUS_DP.toInt())
+                if (playing) {
+                    PlayingBars(
+                        color = c.accent,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = ROW_BARS_OVERHANG_X_DP.dp, y = -ROW_BARS_OVERHANG_Y_DP.dp)
+                            .size(ROW_BARS_DP.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.width(ROW_GAP_DP.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(ROW_TEXT_GAP_DP.dp),
+            ) {
+                Text(
+                    text = track.name,
+                    color = if (playing) c.accent else c.text,
+                    fontSize = ROW_TITLE_SP.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = buildString {
+                        append(track.artist)
+                        if (track.album.isNotBlank()) append(" · ").append(track.album)
+                    },
+                    color = c.textDim,
+                    fontSize = ROW_SUB_SP.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = track.name,
-                color = if (playing) c.accent else c.text,
-                fontSize = 14.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = buildString {
-                    append(track.artist)
-                    if (track.album.isNotBlank()) append(" · ").append(track.album)
-                },
-                color = c.textDim,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (track.duration > 0) {
-            Spacer(Modifier.width(10.dp))
-            Text(text = track.durationStr, color = c.textDim, fontSize = 12.sp)
-        }
-        if (onAdd != null) {
-            Spacer(Modifier.width(10.dp))
-            AddToPlaylistButton(onClick = onAdd)
+            if (track.duration > 0) {
+                Spacer(Modifier.width(ROW_GAP_DP.dp))
+                Text(text = track.durationStr, color = c.textDim, fontSize = ROW_META_SP.sp)
+            }
+            // 「+」只在**有接口 id** 的歌上出现（原版 `UIFactory.gd:193`：
+            // `if with_add and int(song.get("id", 0)) > 0`）。本地曲目在 Kotlin 侧是负数 id
+            // （`LocalLibrary.ID_BASE = -100_000L`），点「+」也加不进播放队列 —— 原版
+            // `AddToQueue.gd:135-138` 会回一句「本地歌曲加不进去」，所以这里干脆不画。
+            if (onAdd != null && track.id > 0L) {
+                Spacer(Modifier.width(ROW_GAP_DP.dp))
+                AddToPlaylistButton(onClick = onAdd)
+                // 行内右边距 5.6dp + 这 5.6dp = 11.2dp，对上原版「+」按钮的
+                // `offset_right = -(ROW_PAD + BUTTON_GAP)` = -(14 + 14)px ÷ 2.5。
+                Spacer(Modifier.width(ROW_PAD_H_DP.dp))
+            }
         }
     }
 }
+
+/** 长按 0.45 秒（`SongRow.gd:20 HOLD_SECONDS := 0.45`）。 */
+private const val SONG_ROW_HOLD_MS = 450L
+
+/** 松手位移上限 26px ÷ 2.5 = 10.4dp（`SongRow.gd:22 TAP_SLOP := 26.0`）。 */
+private const val SONG_ROW_SLOP_DP = 10.4f
 
 /**
  * 三根上下跳动的小音条：列表里「正在播放」的动效指示器。移植自 `scripts/ui/PlayingBars.gd`。
@@ -362,32 +469,39 @@ fun PlayingBars(color: Color, modifier: Modifier = Modifier, active: Boolean = t
 }
 
 /**
- * 歌曲行右侧那颗「+」。做成 34dp 的可点方块（图标 20dp）而不是裸图标 —— 触摸目标太小
- * 在手机上点不中，原版所有可点元素最小也是 40px 起。
+ * 歌曲行右侧那颗「+」。边长 48dp、图标 34.56dp —— 照抄原版 `AddToQueue.gd:33`
+ * `BUTTON_SIZE := 120.0`（120÷2.5）与 `TransportButton.gd:92` 的 `minf(size) * 0.72`。
  *
- * 图标走图标集里的 `add`（`assets/icons_v2/add.png`），不是 Material 的 `Add`。
- * 读屏文案是「加入播放列表」（用户 m05292 项⑥ 的口径），不是「加入歌单」——
- * 长按菜单里那条才叫「添加到歌单」。
+ * 造型也照原版：`AddToQueue.gd:77` 的 `button_box(AppTheme.SURFACE)` —— SURFACE 填充、
+ * RADIUS_SMALL（32px÷2.5 = 12.8dp）圆角、**无描边**；`:74` 的字色是 `ACCENT`。
+ *
+ * 读屏文案沿用「加入播放列表」（＝正在播放的队列，用户 m06166 的口径），不是「加入歌单」。
  */
 @Composable
 fun AddToPlaylistButton(onClick: () -> Unit) {
     val c = PullTheme.colors
     Box(
         modifier = Modifier
-            .size(34.dp)
-            .clip(RoundedCornerShape(Dims.RADIUS_SMALL.dp))
-            .background(c.surfaceHi)
+            .size(ADD_BUTTON_DP.dp)
+            .clip(RoundedCornerShape(ADD_BUTTON_RADIUS_DP.dp))
+            .background(c.surface)
             .clickable(onClick = onClick)
             .semantics { contentDescription = "加入播放列表" },
         contentAlignment = Alignment.Center,
     ) {
         IconAsset(
             name = "add",
-            color = c.textDim,
-            modifier = Modifier.size(20.dp),
+            color = c.accent,
+            modifier = Modifier.size((ADD_BUTTON_DP * BUTTON_ICON_RATIO).dp),
         )
     }
 }
+
+/** 「+」按钮边长（`AddToQueue.gd:33 BUTTON_SIZE := 120.0` px ÷ 2.5）。 */
+private const val ADD_BUTTON_DP = 48f
+
+/** 「+」按钮圆角（`AppTheme.gd:580 button_box()` 的默认半径 `RADIUS_SMALL = 32` px ÷ 2.5）。 */
+private const val ADD_BUTTON_RADIUS_DP = 12.8f
 
 /**
  * 方形封面。空 url 时画原版的代码绘制占位图（[DefaultArt]），避免出现空洞。
@@ -399,6 +513,18 @@ fun AddToPlaylistButton(onClick: () -> Unit) {
  */
 @Composable
 fun Cover(url: String, size: Int, corner: Int = Dims.RADIUS_SMALL) {
+    Cover(url = url, size = size.toFloat(), corner = corner)
+}
+
+/**
+ * 同上，但边长收 `Float`。
+ *
+ * 原版的尺寸是 px 小数（如专辑卡封面 `PLAYLIST_ART := 152.0` ⇒ 60.8dp），
+ * 而 `Dp` 支持小数 —— 走 `Int` 版会把它压成 61 而偏 0.8dp。
+ * 只给确实需要小数的调用方用；整数尺寸继续用上面那个重载，不必写 `48f`。
+ */
+@Composable
+fun Cover(url: String, size: Float, corner: Int = Dims.RADIUS_SMALL) {
     Box(modifier = Modifier.size(size.dp).clip(RoundedCornerShape(corner.dp))) {
         if (url.isNotBlank()) {
             AsyncImage(
@@ -434,7 +560,12 @@ fun DefaultArt(corner: Int = Dims.RADIUS_SMALL) {
 
         val radius = corner.dp.toPx()
 
-        // 1) 底：圆角面板色 + 下 45% 压一层背景色（原版 `DefaultArt.gd:33-38`）。
+        // 1) 底：圆角面板色，再整块压一层背景色（原版 `DefaultArt.gd:33-38`）。
+        //    第二层是 `panel_box(BG@0.55)` 直接 `draw_style_box(lower, full)` ——
+        //    StyleBoxFlat 的 `content_margin_top` 只影响内容排布、**不影响绘制区域**，
+        //    所以原版压暗的是整块，不是只压下半边。早先这里只铺了下面 45%，
+        //    上 55% 保持 SURFACE_HI，整块占位图比原版亮一截（`PlayerPage.kt` 那份
+        //    一直是整块，Android 内部两份 DefaultArt 因此还不一致）。
         drawRoundRect(color = c.surfaceHi, size = size, cornerRadius = CornerRadius(radius, radius))
         clipPath(
             path = Path().apply {
@@ -443,8 +574,8 @@ fun DefaultArt(corner: Int = Dims.RADIUS_SMALL) {
         ) {
             drawRect(
                 color = c.bg.copy(alpha = 0.55f),
-                topLeft = Offset(0f, h * 0.55f),
-                size = Size(w, h * 0.45f),
+                topLeft = Offset(0f, 0f),
+                size = Size(w, h),
             )
         }
 
@@ -575,7 +706,7 @@ fun SettingRow(title: String, hint: String, value: String = "", onClick: () -> U
  * 0.86 并让位给滑轨边，开启态用 `onAccent` 描一圈边保证在亮色上看得见。
  *
  * 颜色全部走 [PullTheme] 令牌，不写死色值 —— 深/浅切换与三种面板质感都会自动跟着变。
- * 触摸目标 52×32dp，比原版可点元素最小 40px(=16dp) 大得多，不会点不中。
+ * 触摸目标 48×27.2dp（原版 `SubScreen.gd:60-61` 的 120×68px），比原版可点元素最小 40px(=16dp) 大得多，不会点不中。
  */
 @Composable
 fun PullSwitch(
@@ -638,10 +769,16 @@ fun PullSwitch(
     }
 }
 
-/** 滑动开关滑轨尺寸（原版无对物，取 Material 规范同量级：52×32dp 触摸友好）。 */
-private const val SWITCH_W_DP = 52f
-private const val SWITCH_H_DP = 32f
-private const val SWITCH_PAD_DP = 3f
+/**
+ * 滑动开关滑轨尺寸：照抄原版 `scripts/ui/SubScreen.gd:60-63` 的
+ * `SWITCH_W := 120.0` / `SWITCH_H := 68.0` / `SWITCH_KNOB := 56.0` / `SWITCH_PAD := 6.0`
+ * （÷2.5 ⇒ 48 × 27.2 / 旋钮 22.4 / 内距 2.4dp）。
+ *
+ * 早先按 Material 规范写的 52×32／内距 3dp 比原版胖一圈，开关在设置、外观两页显得突出。
+ */
+private const val SWITCH_W_DP = 48f
+private const val SWITCH_H_DP = 27.2f
+private const val SWITCH_PAD_DP = 2.4f
 
 /** 分隔线。 */
 @Composable
@@ -683,6 +820,11 @@ fun PlaceholderBody(title: String, lines: List<String>) {
  *
  * 图标占短边 0.72（`TransportButton.gd:92` 的 `minf(size) * 0.72`），比 [IconAsset]
  * 默认的 0.52 大 —— 按钮里的图标要更满。
+ *
+ * 按压缩放：这个钮的 9 个调用点全是二级页/浮层的「收起」箭头，原版那些箭头一律是
+ * `TransportButton`（`SubScreen.gd:216-217`、`AlbumScreen.gd:105`、`ArtistScreen.gd:114`、
+ * `PlayerPage.gd:367` 都是 `Shape.CHEVRON_DOWN`），所以按下缩到 0.88 再回弹；
+ * 涟漪关掉只留缩放，避免两种反馈叠在一起。
  */
 @Composable
 fun RoundIconButton(
@@ -693,12 +835,19 @@ fun RoundIconButton(
     filled: Boolean = true,
 ) {
     val c = PullTheme.colors
+    val interaction = remember { MutableInteractionSource() }
+    val pressScale = rememberPressScale(interaction)
     Box(
         modifier = Modifier
             .size(size.dp)
+            .scale(pressScale)
             .clip(androidx.compose.foundation.shape.CircleShape)
             .then(if (filled) Modifier.background(c.surface) else Modifier)
-            .clickable(onClick = onClick)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+            )
             // 图标集是纯图形，没有语义标签，读屏要靠这里补（原版靠 button.name）。
             .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center,
@@ -711,3 +860,62 @@ fun RoundIconButton(
         )
     }
 }
+
+/**
+ * 详情页最底那条贴底动作条：播放队列入口（原版 `UIFactory.gd:438-480 _build_detail_bar()`）。
+ *
+ * **为什么有这个组件**：原版 `clear_player_bar()` 把 Backdrop/Margin 的底边让到 1800 给迷你
+ * 播放条腾位，而 `NavGuard` 只盖最底 2000..2160 ⇒ **1800..2000 那 200px 是「让位区」，
+ * 没有任何浮层底板，直接露出画布色**，用户截图圈的就是这条带子（`UIFactory.gd:424-433`）。
+ * 原版往这条带子里塞了个「播放列表 · N 首 ›」入口，既填了空白，也回答同一句话里的
+ * 「播放列表在哪？」。
+ *
+ * 几何逐项照抄（`UIFactory.gd:378-379, 454-464`）：
+ * - 高 `DETAIL_BAR_H := 120` px → **48dp**（触控下限）
+ * - 左右各留 `PAD_SCREEN`（16dp，走外层 padding）
+ * - 圆角矩形 `RADIUS_SMALL` —— 原版 `:449` 注释「`-- --style` 只允许播放键是胶囊」
+ * - 字号 `FONT_SUB`(32px)→12.8sp；常态 `SURFACE`/`TEXT`、按下 `ACCENT`/`ON_ACCENT`
+ *
+ * **一处有意的偏差（不照抄锚点）**：原版用 `anchor_top/bottom = 1.0` + `offset_top =
+ * -(120+20)` 把它钉在**屏幕底部**（`UIFactory.gd:456-463`），因为那块空白是「让位区」露出来的。
+ * Kotlin 侧的详情页在浮层里、下方没有迷你播放条，也就没有那块空白，跟着锚底会悬在列表
+ * 与屏幕底之间凭空浮着。这里改为**列尾**（列表下方、随内容走），保留「高 48dp + 圆角矩形
+ * + 一个点进队列页的入口」这三项用户可感知的属性。原版的 `DETAIL_BAR_BOTTOM := 20`(8dp)
+ * 因此不适用，未搬。
+ *
+ * 文案（`UIFactory.gd:496`）：有歌时 `播放列表 · N 首  ›`，空队列时 `播放列表  ›`
+ * （点了进空态页）。
+ *
+ * Kotlin 侧不需要原版那套 `_detail_bars` 静态数组 + 全局只连一次 `playlist_changed` 的
+ * 去重（原版踩过「同静态函数 + 不同 bind 的 Callable 相等 ⇒ 重复连接报 ERROR」），
+ * 这里订阅 `playback.queue` 的 StateFlow 即可。
+ */
+@Composable
+fun DetailQueueBar(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val c = PullTheme.colors
+    val queue by LocalApp.current.playback.queue.collectAsStateWithLifecycle()
+    val count = queue.size
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(DETAIL_QUEUE_BAR_H_DP.dp)
+            .clip(RoundedCornerShape(Dims.RADIUS_SMALL.dp))
+            .background(if (pressed) c.accent else c.surface)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            // 原版 `:496`：`"播放列表 · %d 首  ›" % count if count > 0 else "播放列表  ›"`
+            text = if (count > 0) "播放列表 · $count 首  ›" else "播放列表  ›",
+            color = if (pressed) c.onAccent else c.text,
+            fontSize = DETAIL_QUEUE_BAR_FONT_SP.sp,
+        )
+    }
+}
+
+/** 贴底入口条：高 120px→48dp、字号 `FONT_SUB`32px→12.8sp（`UIFactory.gd:378, 445`）。 */
+private const val DETAIL_QUEUE_BAR_H_DP = 48f
+private const val DETAIL_QUEUE_BAR_FONT_SP = 12.8f

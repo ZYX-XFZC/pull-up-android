@@ -88,4 +88,24 @@ object Quality {
     /** 服务端实际下发档位的中文名；认不出就把原始 level 原样回给界面（便于排查）。 */
     fun servedLabel(served: String): String =
         if (served.isBlank()) "" else LEVELS.firstOrNull { it.key == served }?.label ?: served
+
+    /**
+     * vkeys 第三方接口需要的数字音质参数。
+     *
+     * vkeys 只区分三档：
+     * - 8 = 标准 128k
+     * - 12 = 较高 192k
+     * - 16 = 极高 320k
+     *
+     * lossless 及以上档位 vkeys 要么返回「业务运行异常」，要么静默降级，
+     * 所以**统一映射到 16**（320k），让 vkeys 尽力给最高能给的。
+     *
+     * 注意：这是 vkeys 专用的映射，与网易云官方的 level key 不是一个体系，
+     * 不要拿它去请求 `/song/url/v1`。
+     */
+    fun vkeysQuality(key: String): Int = when (key) {
+        STANDARD -> 8
+        HIGHER -> 12
+        else -> 16
+    }
 }

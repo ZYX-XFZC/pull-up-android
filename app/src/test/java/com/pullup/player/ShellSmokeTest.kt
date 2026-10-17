@@ -51,6 +51,10 @@ class ShellSmokeTest {
     @Before
     fun setUp() {
         app = (rule.activity.application as PullUpApp).container
+        // 播放会话是**落盘**的（`filesDir/play_session.json`），上一条用例留下的队列会被
+        // 壳层的 `restoreSession()` 读回来 —— 那样迷你条上显示的是上一首的歌名而不是
+        // 「未在播放」，后面依赖空态的用例就全错位了。每个用例开头清一次队列。
+        app.playback.clearQueue()
         // 每个用例都从干净状态开始，免得互相污染
         app.playlists.lockAll()
         app.favorites.clear()
@@ -127,6 +131,26 @@ class ShellSmokeTest {
         assertTrue("界面上找不到节点：$desc", hasDesc(desc))
         rule.onAllNodesWithContentDescription(desc).onFirst().performClick()
         rule.waitForIdle()
+    }
+
+    /**
+     * 点一个节点但**不等 idle**。
+     *
+     * 加进空队列这一下会真的放起来（原版 `PlayerManager.gd:347-349`：队列空就 `play_song`），
+     * 而在播那一行的律动条是 `withFrameNanos` 无限循环（`ui/components/Components.kt:348`），
+     * 界面从此永远不 idle —— 和播放页同理（见 [hasTextNoIdle]）。所以要关掉主时钟再点。
+     */
+    private fun clickDescNoIdle(desc: String) {
+        val clock = rule.mainClock
+        val previous = clock.autoAdvance
+        clock.autoAdvance = false
+        try {
+            clock.advanceTimeBy(600)
+            rule.onAllNodesWithContentDescription(desc).onFirst().performClick()
+            clock.advanceTimeBy(600)
+        } finally {
+            clock.autoAdvance = previous
+        }
     }
 
     private fun pressBack() {
@@ -524,93 +548,38 @@ class ShellSmokeTest {
         assertFalse(rule.activity.isFinishing)
     }
 
-    // ---- 播放列表（用户 m05292 项⑤⑥）-------------------------------------
+    // ---- 播放队列（原版 `AddToQueue.gd` / `PlayerManager.gd:344`）-------------
 
     @Test
-    fun `歌曲行的加号弹的是播放列表选择器 不是歌单`() {
+    fun `歌曲行的加号是直接加进播放队列 不再弹选择器`() {
         // 先造一首听过的歌：加号只在「最近播放」列表行上（首页没有歌曲行）。
-        app.history.record(com.pullup.player.data.Track(id = 1001L, name = "冒烟加号", artist = "甲", album = "乙"))
+        app.history.record(Track(id = 1001L, name = "冒烟加号", artist = "甲", album = "乙"))
         clickText("音乐库")
         rule.waitForIdle()
         assertText("最近播放")
 
-        // 最近播放列表里点第一颗「+」：面板出现、文案对得上。
         assertTrue("歌曲行右侧应该有「+」", hasDesc("加入播放列表"))
-        clickDesc("加入播放列表")
-        assertText("把这首放进哪个播放列表？")
-        assertText("新建播放列表")
-        assertText("取消")
+        clickDescNoIdle("加入播放列表")
 
-        // 取消后面板收掉，页面还在。
-        clickText("取消")
-        rule.waitForIdle()
-        assertText("最近播放")
+        // 老行为（弹「把这首放进哪个播放列表？」选择器）必须消失。
+        assertFalse("不该再弹播放列表选择器", hasTextNoIdle("把这首放进哪个播放列表？"))
+
+        // 新行为：歌直接进了播放队列。
+        assertEquals(1, app.playback.getQueueSize())
+        assertEquals(1001L, app.playback.queue.value.first().id)
     }
 
     @Test
-    fun `点播放列表后 歌进列表并按当前模式起播`() {
-        // 同上：先造一首听过的歌，让最近播放列表里有行可点。
-        app.history.record(com.pullup.player.data.Track(id = 1002L, name = "冒烟起播", artist = "甲", album = "乙"))
+    fun `同一首歌不会重复加进播放队列`() {
+        app.history.record(Track(id = 1002L, name = "重复加号", artist = "甲", album = "乙"))
         clickText("音乐库")
         rule.waitForIdle()
-        assertText("最近播放")
 
-        // 先把播放模式切到「单曲循环」，验证起播不重置模式（项⑥「按当前模式播放」）。
-        app.playback.setPlayMode(1)
-        rule.waitForIdle()
+        clickDescNoIdle("加入播放列表")
+        assertEquals(1, app.playback.getQueueSize())
 
-        // 走「新建播放列表」这一行：路径与空态那颗等价（都是建→加→起播），
-        // 但这一行**恒定存在**，不依赖列表为空，断言更稳。
-        clickDesc("加入播放列表")
-        // 面板里只有这一条带歌名的节点；断言它 = 面板开对了。
-        assertTrue("面板应该列出当前歌曲", hasText("冒烟起播"))
-        clickText("新建播放列表")
-        // 点完会起播 + 开播放页，界面从此不 idle（见 hasTextNoIdle 的注释），
-        // 所以这里只轮询数据层、**不调 waitForIdle**。
-        rule.waitUntil(timeoutMillis = 8_000) { app.queuePlaylists.all().isNotEmpty() }
-
-        // 1) 列表真的建了、歌真的进去了
-        val lists = app.queuePlaylists.all()
-        assertEquals(1, lists.size)
-        assertEquals("未命名播放列表", lists[0].name)
-        assertEquals(1, lists[0].songs.size)
-        assertEquals(1002L, lists[0].songs.first().id)
-
-        // 2) 队列就是这个播放列表，且从刚加的那首开始播
-        assertEquals(lists[0].songs.first().id, app.playback.current.value?.id)
-        assertEquals(lists[0].songs, app.playback.queue.value)
-
-        // 3) 模式没被重置 —— 起播前是单曲循环，起播后还是
-        assertEquals(1, app.playback.playMode.value)
-
-        // 4) 播放页跟着开了（原范式：加完就 openPlayer）。
-        //    播放页里有 250ms 周期的高亮轮询 + 波形动画，Espresso 永远等不到 idle，
-        //    所以断言走 hasTextNoIdle（关掉主时钟 autoAdvance，见其注释）。
-        //    「正在播放」是播放页顶栏的 eyebrow 文案，只在播放页出现；
-        //    迷你条上的标题换成这首歌 = 起播真的发生了。
-        assertTrue("加完歌应该自动打开播放页", hasTextNoIdle("正在播放"))
-        assertTrue("迷你条应该显示刚加的那首", hasTextNoIdle("冒烟起播"))
-    }
-
-    @Test
-    fun `播放列表里的同一首歌不会重复加`() {
-        val pl = app.queuePlaylists.create("测试列表")
-        val song = Track(id = 4242L, name = "重复测试", artist = "甲", album = "乙")
-        app.queuePlaylists.add(pl.id, song)
-        app.queuePlaylists.add(pl.id, song)
-        assertEquals(1, app.queuePlaylists.find(pl.id)?.songs?.size)
-    }
-
-    @Test
-    fun `播放列表落盘后可读回 且列表上限生效`() {
-        val pl = app.queuePlaylists.create("落盘测试")
-        app.queuePlaylists.add(pl.id, Track(id = 7L, name = "持久化", artist = "甲", album = "乙"))
-        // 重新读盘：新实例 + 显式 load()
-        val reloaded = com.pullup.player.data.QueuePlaylists(rule.activity.applicationContext)
-        val back = reloaded.find(pl.id)
-        assertNotNull("播放列表应该能落盘读回", back)
-        assertEquals("落盘测试", back?.name)
-        assertEquals(1, back?.songs?.size)
-        assertEquals(7L, back?.songs?.first()?.id)
+        // 再点一次：按 id 判重，队列长度不变（原版 `PlayerManager.gd:350-351`）。
+        clickDescNoIdle("加入播放列表")
+        assertEquals(1, app.playback.getQueueSize())
     }
 }

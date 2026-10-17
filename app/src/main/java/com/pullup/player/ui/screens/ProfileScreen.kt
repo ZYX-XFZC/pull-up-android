@@ -56,9 +56,16 @@ private const val ABOUT_PAD_V_DP = 11
 /** 关于卡片内部间距 14px（`ProfileScreen.gd:207`）⇒ 6dp。 */
 private const val ABOUT_GAP_DP = 6
 
-/** 作者主页按钮：高 92px ÷ 2.5 = 36.8dp，内边距左右 34px ÷ 2.5 = 13.6dp（`ProfileScreen.gd:231-247`）。 */
+/**
+ * 作者主页按钮：高 92px ÷ 2.5 = 36.8dp（`ProfileScreen.gd:236`）。
+ *
+ * **左右内边距为 0**：原版 `ProfileScreen.gd:238` 用 `AppTheme.button_box()`，而它
+ * 明确「只有填充、没有描边、**不带内边距**」（`AppTheme.gd:578-581`）——需要内边距的调用方
+ * 自己套 `MarginContainer`，这里没套。于是「作者主页 ›」从按钮左边缘起排。
+ * 早先补了 13.6dp，比原版多缩进一整格，和上方「作者：XFZC」也不齐。
+ */
 private const val AUTHOR_HOME_HEIGHT_DP = 36.8f
-private const val AUTHOR_HOME_PAD_H_DP = 13.6f
+private const val AUTHOR_HOME_PAD_H_DP = 0f
 
 /**
  * 设置页（Tab 页，`page = 3`）。移植自 Godot 版 `scripts/ui/ProfileScreen.gd`。

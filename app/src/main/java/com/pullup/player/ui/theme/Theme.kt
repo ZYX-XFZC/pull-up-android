@@ -1,4 +1,4 @@
-﻿package com.pullup.player.ui.theme
+package com.pullup.player.ui.theme
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -17,8 +17,10 @@ import com.pullup.player.R
 /**
  * 视觉系统单一真源，移植自 Godot 版 scripts/ui/AppTheme.gd。
  *
- * 设计画布 1080x1920（竖屏），原稿所有数值都按这个尺度写。Android 上我们按 dp 重建：
- * 1080px 宽 = 412dp，即 1dp ≈ 2.62px，故原稿 px 值 ÷ 2.62 得到 dp。
+ * 设计画布 1080x2160（18:9 竖屏），原稿所有数值都按这个尺度写。Android 上我们按 dp 重建：
+ * **1080px 宽 = 432dp，即 1dp = 2.5px**，故原稿 px 值 ÷ 2.5 得到 dp/sp
+ * （`AppTheme.gd:63-79` 与 `docs/REF_QPLAYER.md` 都是这个口径，不是 412dp / 2.62px ——
+ * 早期这里写错过，照着算会让全站几何偏大约 4.8%）。
  *
  * 调色板沿用原型：近黑蓝画布 + 青柠强调色 + 卡片发丝描边 + 胶囊按钮 + 逐曲环境光晕。
  * 面板材质有「亚克力 / 云母 / 纯色」三档，深浅模式两套令牌。
@@ -190,7 +192,7 @@ object PullTheme {
         @Composable get() = LocalPullTheme.current
 }
 
-// ---- 几何（原稿 px ÷ 2.62 → dp） -----------------------------------------
+// ---- 几何（原稿 px ÷ 2.5 → dp） -------------------------------------------
 
 object Dims {
     /** 屏幕左右留白。原稿 PAD_SCREEN = 40px。 */

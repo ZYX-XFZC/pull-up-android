@@ -1,4 +1,4 @@
-﻿package com.pullup.player.ui.screens
+package com.pullup.player.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +27,7 @@ import com.pullup.player.data.TextGuard
 import com.pullup.player.ui.LocalApp
 import com.pullup.player.ui.LocalShell
 import com.pullup.player.ui.components.ActionButton
+import com.pullup.player.ui.components.DetailQueueBar
 import com.pullup.player.ui.components.MessageCard
 import com.pullup.player.ui.components.RoundIconButton
 import com.pullup.player.ui.components.SongRow
@@ -172,9 +173,15 @@ fun AlbumScreen(album: Album) {
                     // 「加入歌单」这条操作路径；若要 100% 还原原版行为，删掉这一行即可。
                     onLongClick = { shell.showSongActions(track) },
                     // 用户 m05292 项⑥：每行右侧的「+」→ 播放列表选择器 → 加进去并按当前播放模式起播。
-                    onAdd = { shell.addToQueueList(track) },
+                    onAdd = { shell.addToQueue(track) },
                 )
             }
         }
+
+        // ---- 贴底入口条：播放队列（原版 `UIFactory.gd:438-480 _build_detail_bar()`）----
+        // 原版是往「让位区」那 200px 空白里塞一条入口（用户 m06483/m06486
+        // 「在搜索出来的歌单下方有大片空白，建议放点什么」+「播放列表在哪？」）。
+        // Kotlin 侧没有那块空白，按功能等价放在列表下方：高 48dp、圆角矩形、点进队列页。
+        DetailQueueBar(onClick = { shell.openQueue() })
     }
 }

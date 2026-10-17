@@ -137,13 +137,13 @@ class PlaybackController(
     private val _duration = MutableStateFlow(0L)
     val duration: StateFlow<Long> = _duration.asStateFlow()
 
-    private val _playMode = MutableStateFlow(LIST_LOOP)
+    private val _playMode = MutableStateFlow(prefs.playMode())
     val playMode: StateFlow<Int> = _playMode.asStateFlow()
 
-    private val _shuffle = MutableStateFlow(false)
+    private val _shuffle = MutableStateFlow(prefs.shuffle())
     val shuffle: StateFlow<Boolean> = _shuffle.asStateFlow()
 
-    private val _repeatCount = MutableStateFlow(1)
+    private val _repeatCount = MutableStateFlow(prefs.repeatCount())
     val repeatCount: StateFlow<Int> = _repeatCount.asStateFlow()
 
     private val _loading = MutableStateFlow(false)
@@ -184,6 +184,8 @@ class PlaybackController(
     // ---- 初始化 ------------------------------------------------------------
 
     init {
+        // ★ 恢复会话前的 shuffle 状态到 ExoPlayer
+        player.shuffleModeEnabled = _shuffle.value
         syncPlayModeToPlayer()
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -354,6 +356,77 @@ class PlaybackController(
         return if (idx >= 0) idx else player.currentMediaItemIndex
     }
 
+    /**
+     * 把一首歌**追加到播放队列末尾**，**不打断当前播放**（`PlayerManager.gd:344 add_to_queue()`）。
+     *
+     * 与 [playSong] 的区别：`playSong()` 会**换掉整条队列**（列表页点歌就是那个语义），
+     * 这里只往现有队列尾部添一首，当前这首继续播，轮到它时再按现在的播放模式走
+     * （随机 / 单曲循环 / 列表循环 / 单次的走向一律交给 `_on_finished()` 的现成逻辑）。
+     * 已经在队列里就不重复添加（按歌曲 id 判重，与 `_index_of` 同口径）。
+     *
+     * 返回 true ＝ 真的加进去了；false ＝ 队列里已经有了（或 [song] 是空的）。
+     * 队列本来就是空的时候，这一首直接开播 —— 否则「加入队列」等于什么都没发生。
+     */
+    fun addToQueue(song: Track): Boolean {
+        if (song.id == 0L && song.name.isBlank() && !song.local) return false
+        val q = _queue.value
+        if (q.isEmpty() || currentIndex() < 0) {
+            playSong(song, listOf(song))
+            return true
+        }
+        if (q.any { it.id == song.id }) return false
+        _queue.value = q + song
+        tracksById = tracksById + (song.id to song)
+        player.addMediaItem(song.toMediaItem())
+        saveSession()
+        return true
+    }
+
+    /** 当前播放队列的长度（`PlayerManager.gd:358 get_queue_size()`）。 */
+    fun getQueueSize(): Int = _queue.value.size
+
+    /**
+     * 从队列里删掉第 [index] 首（队列页的「×」）。`PlayerManager.gd:371 remove_from_queue()`。
+     *
+     * 返回 true ＝ 真删了。拒绝三种情况：
+     *   * [index] 越界；
+     *   * 队列只剩一首（删光了播放器就没东西可播，界面上的「清空」才是那个语义）；
+     *   * 删的是**当前正在播的那首** —— 直接抽走会让当前下标指向别的歌而音频还在放旧歌，
+     *     所以调用方要先跳走再删（队列页对当前行不显示「×」）。
+     *
+     * 删除点落在当前曲目**之前**时下标要跟着前移：这里不用手动算，
+     * [currentIndex] 是拿 `_current.value` 的 id 去新队列里现查的，天然对齐。
+     */
+    fun removeFromQueue(index: Int): Boolean {
+        val q = _queue.value
+        if (index < 0 || index >= q.size) return false
+        if (q.size <= 1) return false
+        if (index == currentIndex()) return false
+        val next = q.toMutableList()
+        next.removeAt(index)
+        _queue.value = next
+        player.removeMediaItem(index)
+        saveSession()
+        return true
+    }
+
+    /**
+     * 清空整条队列并停止播放（队列页的「清空」）。`PlayerManager.gd:389 clear_queue()`。
+     *
+     * 不做成「逐首删」：那样最后一首永远删不掉（[removeFromQueue] 拒绝清空），
+     * 这里直接把队列与当前曲目一起归零，播放器停掉。
+     */
+    fun clearQueue() {
+        if (_queue.value.isEmpty() && _current.value == null) return
+        _queue.value = emptyList()
+        player.clearMediaItems()
+        _current.value = null
+        _duration.value = 0L
+        _servedQuality.value = ""
+        stop()
+        saveSession()
+    }
+
     // ---- 传输控制 ----------------------------------------------------------
 
     /**
@@ -417,6 +490,7 @@ class PlaybackController(
     fun setPlayMode(mode: Int) {
         if (mode !in 0..2 || mode == _playMode.value) return
         _playMode.value = mode
+        prefs.setPlayMode(mode)     // ★ 落盘
         playsLeft = _repeatCount.value
         syncPlayModeToPlayer()
     }
@@ -424,16 +498,20 @@ class PlaybackController(
     fun cyclePlayMode() = setPlayMode((_playMode.value + 1) % 3)
 
     fun setShuffle(enabled: Boolean) {
+        if (enabled == _shuffle.value) return
         _shuffle.value = enabled
+        prefs.setShuffle(enabled)   // ★ 落盘
         player.shuffleModeEnabled = enabled
     }
 
     fun toggleShuffle() = setShuffle(!_shuffle.value)
 
     fun setRepeatCount(count: Int) {
-        _repeatCount.value = count.coerceIn(1, 99)
+        val v = count.coerceIn(1, 99)
+        _repeatCount.value = v
+        prefs.setRepeatCount(v)     // ★ 落盘
         // 立刻生效到正在播的那首。
-        playsLeft = _repeatCount.value
+        playsLeft = v
     }
 
     private fun syncPlayModeToPlayer() {
@@ -560,6 +638,10 @@ class PlaybackController(
             put("index", currentIndex().coerceAtLeast(0))
             _current.value?.let { put("song", it.toJson()) }
             put("position", player.currentPosition.coerceAtLeast(0L) / 1000.0)
+            // ★ 会话里也带上播放模式（prefs 已经存了，这里作为双保险）
+            put("playMode", _playMode.value)
+            put("shuffle", _shuffle.value)
+            put("repeatCount", _repeatCount.value)
         }
     }
 

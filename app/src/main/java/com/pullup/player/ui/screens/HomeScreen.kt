@@ -79,6 +79,12 @@ private const val SECTION_GAP_DP = 10.4f
 private const val HEADER_GAP_DP = 5.6f
 
 /** 顶栏圆钮 95×95px（`HomeScreen.gd:297`）。 */
+/**
+ * 顶栏圆钮里图标画框相对按钮短边的比例（原版 `scripts/ui/NavIcon.gd:33,38`：
+ * `var s := minf(size.x, size.y)` 然后 `var side := s * 0.92`）。
+ */
+private const val HEADER_ICON_RATIO = 0.92f
+
 private const val HEADER_BUTTON_DP = 38
 
 /** 搜索胶囊高 120px（`HomeScreen.gd:321`）。 */
@@ -424,7 +430,10 @@ private fun HomeHeader(onSearch: () -> Unit) {
             IconAsset(
                 name = "search",
                 color = c.icon.copy(alpha = 0.72f),
-                modifier = Modifier.size(20.dp),
+                // 图标画框 = 按钮短边 × 0.92（原版 `NavIcon.gd:33,38` 的 `side := s * 0.92`），
+                // 95px×0.92÷2.5 = 34.96dp。早先写死 20dp，图集里的图形只占位图约 51%,
+                // 落到屏上视觉直径约 10dp，比原版的约 17.9dp 小了一半，圆钮里显得空。
+                modifier = Modifier.size(HEADER_BUTTON_DP.dp * HEADER_ICON_RATIO),
             )
         }
     }

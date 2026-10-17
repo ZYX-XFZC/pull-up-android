@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.ui.unit.sp
 import com.pullup.player.data.Preferences
 
 /**
@@ -47,8 +48,16 @@ fun PullUpTheme(prefs: Preferences, content: @Composable () -> Unit) {
                 // `assets/fonts/DreamHanSansCN-W19.ttf`，usWeightClass 666 中偏粗），
                 // 即**整个 App 的默认字体**，不是某几处的点缀。这里在 MaterialTheme
                 // 之内再下发一层：继承它给的 bodyLarge 字号，只把字体族换掉。
+                //
+                // 字号也跟着原版走：`AppTheme.gd:115` 还设了
+                // `theme.default_font_size = AppTheme.FONT_BODY`（42px ⇒ 16.8sp）。
+                // 不设这一条的话，漏写 `fontSize` 的 `Text` 会落到 Material 的 16sp，
+                // 比原版小 0.8sp —— 全站所有「没显式指定字号」的文本都受影响。
                 ProvideTextStyle(
-                    value = LocalTextStyle.current.copy(fontFamily = DreamHanSans),
+                    value = LocalTextStyle.current.copy(
+                        fontFamily = DreamHanSans,
+                        fontSize = Typo.BODY.sp,
+                    ),
                     content = content,
                 )
             },
@@ -87,7 +96,7 @@ private fun previewColors(dark: Boolean) = PullColors(
     accentDim = androidx.compose.ui.graphics.Color(0x2EBCEB69),
     accent2 = androidx.compose.ui.graphics.Color(0xFFE0E3E7),
     violet = androidx.compose.ui.graphics.Color(0xFFB0ABA0),
-    onAccent = androidx.compose.ui.graphics.Color(0xFF080A10),
+    onAccent = androidx.compose.ui.graphics.Color(0xFF081323),
     icon = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.92f),
     track = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.14f),
     scrim = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.42f),

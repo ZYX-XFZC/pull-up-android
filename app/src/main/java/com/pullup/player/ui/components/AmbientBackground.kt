@@ -2,6 +2,7 @@ package com.pullup.player.ui.components
 
 import android.content.Context
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -76,7 +77,13 @@ fun AmbientBackground(app: AppContainer, modifier: Modifier = Modifier) {
         ?: if (isDark) FALLBACK_B else FALLBACK_B_LIGHT
 
     // 原版 `set_song_colors` 用 Tween 交叉淡入两团光斑，时长 `AppTheme.ANIM_AMBIENT`。
-    val spec = tween<Color>(theme.anim(Motion.ANIM_AMBIENT))
+    // 曲线也照抄 `AmbientBackground.gd:109` 的 `TRANS_CUBIC + EASE_IN_OUT`
+    // （等价 cubic-bezier(0.645, 0.045, 0.355, 1)）；早先用的是 Compose 默认的
+    // FastOutSlowIn，起步偏快、收尾偏硬，换歌时那一下过渡手感不同。
+    val spec = tween<Color>(
+        durationMillis = theme.anim(Motion.ANIM_AMBIENT),
+        easing = CubicBezierEasing(0.645f, 0.045f, 0.355f, 1f),
+    )
     val glowA by animateColorAsState(targetValue = light, animationSpec = spec, label = "ambientA")
     val glowB by animateColorAsState(targetValue = dark, animationSpec = spec, label = "ambientB")
 
@@ -85,11 +92,23 @@ fun AmbientBackground(app: AppContainer, modifier: Modifier = Modifier) {
 
     Box(modifier = modifier.fillMaxSize().background(c.bg)) {
         Canvas(Modifier.fillMaxSize()) {
-            glow(center = Offset(0.28f, 0.18f), radius = 0.62f, color = glowA.copy(alpha = alphaA))
-            glow(center = Offset(0.78f, 0.82f), radius = 0.58f, color = glowB.copy(alpha = alphaB))
+            glow(center = Offset(0.28f, 0.18f), radius = GLOW_RADIUS_A, color = glowA.copy(alpha = alphaA))
+            glow(center = Offset(0.78f, 0.82f), radius = GLOW_RADIUS_B, color = glowB.copy(alpha = alphaB))
         }
     }
 }
+
+/**
+ * 两团光斑的**实际径向半径**（归一化）。
+ *
+ * 原版 `AmbientBackground.gd:59`/`:68` 传的 0.62 / 0.58 不是半径，而是
+ * `GradientTexture2D` 的 `fill_to = center + Vector2(r, r)` —— 也就是**对角线偏移**，
+ * 真正的径向半径是它的 √2 倍（`:82-96 _make_glow()`）。
+ * 早先直接把 0.62 当半径传进 `Brush.radialGradient`，光斑比原版小约 29%，屏幕四角更黑。
+ */
+private val GLOW_RADIUS_A = 0.62f * 1.41421356f
+
+private val GLOW_RADIUS_B = 0.58f * 1.41421356f
 
 // ---- 兜底色（拿不到封面时用）：分深浅两套 ------------------------------------
 

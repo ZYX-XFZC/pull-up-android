@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
@@ -42,8 +43,6 @@ import com.pullup.player.ui.components.BootSplash
 import com.pullup.player.ui.components.BootSplashState
 import com.pullup.player.ui.components.PullNavBar
 import com.pullup.player.ui.screens.AlbumScreen
-import com.pullup.player.ui.screens.AddToPlaylistSheet
-import com.pullup.player.ui.screens.AddToQueueListSheet
 import com.pullup.player.ui.screens.AppearanceScreen
 import com.pullup.player.ui.screens.ArtistScreen
 import com.pullup.player.ui.screens.EatenScreen
@@ -55,12 +54,14 @@ import com.pullup.player.ui.screens.PlayerPage
 import com.pullup.player.ui.screens.PlaylistEditorOverlay
 import com.pullup.player.ui.screens.PlaylistOverlay
 import com.pullup.player.ui.screens.ProfileScreen
+import com.pullup.player.ui.screens.QueueScreen
 import com.pullup.player.ui.screens.SearchScreen
 import com.pullup.player.ui.screens.SongActionSheet
 import com.pullup.player.ui.screens.TasteScreen
 import com.pullup.player.ui.theme.Dims
 import com.pullup.player.ui.theme.Motion
 import com.pullup.player.ui.theme.PullTheme
+import com.pullup.player.ui.theme.Typo
 import com.pullup.player.ui.theme.pullShape
 import kotlinx.coroutines.delay
 
@@ -83,6 +84,13 @@ fun PullUpRoot(app: AppContainer) {
     var exitArmed by remember { mutableStateOf(false) }
     var exitHint by remember { mutableStateOf(false) }
     val context = LocalContext.current
+
+    // 底部短提示（原版 `AddToQueue.gd:169-204 _show_toast()`）。
+    // 每次弹都把 [toastSeq] 加一：同一条文案连点两次也能重新计时，
+    // 因为 `LaunchedEffect` 的键变了会重启（对应原版「同屏只留一条，新的顶掉旧的」）。
+    var toastText by remember { mutableStateOf("") }
+    var toastAccent by remember { mutableStateOf(false) }
+    var toastSeq by remember { mutableStateOf(0) }
 
     // 启动初始化动画（原版 `scripts/ui/BootSplash.gd` + `main.gd:54` 的 `_should_show_boot()`）。
     // `shouldShow` 有副作用（置「本进程已播过」），所以必须包在 `remember` 里只求值一次，
@@ -134,10 +142,32 @@ fun PullUpRoot(app: AppContainer) {
             }
 
             override fun openEditor() = push(Overlay.Editor)
-            override fun openEditorFor(song: Track) = push(Overlay.EditorFor(song))
+            override fun openQueue() = push(Overlay.Queue)
             override fun showSongActions(song: Track) = push(Overlay.Actions(song))
-            override fun addToPlaylist(song: Track) = push(Overlay.AddTo(song))
-            override fun addToQueueList(song: Track) = push(Overlay.AddToQueue(song))
+            override fun addToQueue(song: Track) {
+                // 原版 `AddToQueue.gd:133-143 add()`：先拒没有接口 id 的本地曲目，
+                // 再交给 `PlayerManager.add_to_queue()`，按返回值决定提示文案与颜色。
+                val added = if (song.id <= 0L) {
+                    false
+                } else {
+                    app.playback.addToQueue(song)
+                }
+                val local = song.id <= 0L
+                showToast(
+                    text = when {
+                        local -> "本地歌曲加不进去"
+                        added -> "已加入播放列表"
+                        else -> "播放列表里已经有了"
+                    },
+                    accent = added,
+                )
+            }
+
+            override fun showToast(text: String, accent: Boolean) {
+                toastText = text
+                toastAccent = accent
+                toastSeq++
+            }
             override fun openEaten() = push(Overlay.Eaten)
 
             override fun openUrl(url: String) {
@@ -188,6 +218,13 @@ fun PullUpRoot(app: AppContainer) {
             delay(1200)
             exitHint = false
         }
+    }
+
+    // 提示浮层：1.6 秒后自己消失（原版 `TOAST_SECONDS := 1.6`，`AddToQueue.gd:30`）。
+    LaunchedEffect(toastSeq) {
+        if (toastSeq == 0) return@LaunchedEffect
+        delay(1600)
+        toastText = ""
     }
 
     BackHandler { shellImpl.handleBack() }
@@ -269,24 +306,6 @@ fun PullUpRoot(app: AppContainer) {
                         SongActionSheet(
                             song = overlay.song,
                             onDismiss = { stack.remove(overlay) },
-                            onOpenPlaylist = { id ->
-                                stack.remove(overlay)
-                                shellImpl.openPlaylist(id)
-                            },
-                        )
-                    }
-                    is Overlay.AddTo -> {
-                        // 「+」的选择器也是底部弹层，但加完之后要起播，所以不参与整页淡入。
-                        AddToPlaylistSheet(
-                            song = overlay.song,
-                            onDismiss = { stack.remove(overlay) },
-                        )
-                    }
-                    is Overlay.AddToQueue -> {
-                        // 用户 m05292 项⑤⑥：「+」→ 播放列表选择器 → 按当前模式起播。
-                        AddToQueueListSheet(
-                            song = overlay.song,
-                            onDismiss = { stack.remove(overlay) },
                         )
                     }
                     is Overlay.Artist -> FullOverlay(onClose = { stack.remove(overlay) }) {
@@ -304,18 +323,8 @@ fun PullUpRoot(app: AppContainer) {
                     is Overlay.Editor -> FullOverlay(onClose = { stack.remove(overlay) }) {
                         PlaylistEditorOverlay()
                     }
-                    // 「新建歌单」从「添加到歌单」面板进来：建好就把那首放进去
-                    // （原版 `ActionSheet.gd:248-258` 的 `_pending_add_after_create`）。
-                    is Overlay.EditorFor -> FullOverlay(onClose = { stack.remove(overlay) }) {
-                        PlaylistEditorOverlay(
-                            onCreated = { id ->
-                                app.playlists.addSong(id, overlay.song)
-                                app.playlists.find(id)?.let { pl ->
-                                    app.playback.playSong(overlay.song, pl.songs)
-                                }
-                                shellImpl.openPlayer()
-                            },
-                        )
+                    is Overlay.Queue -> FullOverlay(onClose = { stack.remove(overlay) }) {
+                        QueueScreen(onClose = { stack.remove(overlay) })
                     }
                     is Overlay.Password -> PasswordOverlay(
                         playlistId = overlay.id,
@@ -349,6 +358,32 @@ fun PullUpRoot(app: AppContainer) {
                         .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.72f))
                         .padding(horizontal = 22.dp, vertical = 12.dp),
                 )
+            }
+
+            // ---- 加入播放列表的短提示（原版 `AddToQueue.gd:169-204 _show_toast()`）----
+            // 贴底居中：`TOAST_BOTTOM := 420.0` px = 168dp（抬到底部导航与迷你播放条之上），
+            // 高 `TOAST_HEIGHT := 104.0` px = 41.6dp，圆角用 RADIUS_SMALL（原版
+            // `AppTheme.panel_box(SURFACE, RADIUS_SMALL, 26)`，**不是胶囊** —— 胶囊只留给播放键）。
+            androidx.compose.animation.AnimatedVisibility(
+                visible = toastText.isNotEmpty(),
+                enter = fadeIn(tween(200)),
+                exit = fadeOut(tween(200)),
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 168.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .heightIn(min = 41.6.dp)
+                        .clip(pullShape(Dims.RADIUS_SMALL))
+                        .background(PullTheme.colors.surface)
+                        .padding(horizontal = 10.4.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = toastText,
+                        color = if (toastAccent) PullTheme.colors.accent else PullTheme.colors.textDim,
+                        fontSize = Typo.SUB.sp,
+                    )
+                }
             }
 
             // ---- 启动动画层（压在最上面，播完自毁）----
@@ -401,15 +436,13 @@ private sealed interface Overlay {
     data object Appearance : Overlay
     data object Player : Overlay
     data object Editor : Overlay
-    // 「新建歌单」从「添加到歌单」进来：带着那首歌，建好后要把它塞进新歌单。
-    data class EditorFor(val song: Track) : Overlay
+    /** 播放队列页（原版 `QueueScreen.gd`）。 */
+    data object Queue : Overlay
     data object Eaten : Overlay
     data class Artist(val song: Track) : Overlay
     // 名字与 `data.Album` 同名，这里必须写全限定类型，否则嵌套类会自指成死循环类型。
     data class Album(val album: com.pullup.player.data.Album) : Overlay
     data class Actions(val song: Track) : Overlay
-    data class AddTo(val song: Track) : Overlay
-    data class AddToQueue(val song: Track) : Overlay
     data class Playlist(val id: String) : Overlay
     data class Password(val id: String) : Overlay
 }

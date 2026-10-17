@@ -16,7 +16,6 @@ class AppContainer(context: Context) {
     val favorites = Favorites(appContext)
     val history = History(appContext)
     val playlists = Playlists(appContext, favorites)
-    val queuePlaylists = QueuePlaylists(appContext)
     val blacklist = Blacklist(appContext)
     val searchHistory = SearchHistory(appContext)
     val localLibrary = LocalLibrary(appContext)

@@ -119,10 +119,10 @@ fun AppearanceScreen() {
         modifier = Modifier
             .fillMaxSize()
             .background(c.bg)
-            // SubScreen 骨架 Margin：左右 PAD_SCREEN、上 64px→26dp、下 PAD_SCREEN→16dp。
-            .padding(start = Dims.PAD_SCREEN.dp, end = Dims.PAD_SCREEN.dp, top = 26.dp, bottom = 16.dp),
-        // SubScreen 骨架 Column separation 22px → 9dp。
-        verticalArrangement = Arrangement.spacedBy(9.dp),
+            // SubScreen 骨架 Margin：左右 PAD_SCREEN、上 64px→25.6dp、下 PAD_SCREEN→16dp。
+            .padding(start = Dims.PAD_SCREEN.dp, end = Dims.PAD_SCREEN.dp, top = 25.6.dp, bottom = 16.dp),
+        // SubScreen 骨架 Column separation 22px → 8.8dp。
+        verticalArrangement = Arrangement.spacedBy(8.8.dp),
     ) {
         // ---- TopBar：返回圆钮 + 标题（原版 `title_label`：FONT_TITLE/TEXT）----
         Row(
@@ -154,10 +154,10 @@ fun AppearanceScreen() {
             fontSize = Typo.META.sp,
         )
 
-        // ---- Scroll → content VBox（原版 separation 12px → 5dp）----
+        // ---- Scroll → content VBox（原版 separation 12px → 4.8dp）----
         Column(
             modifier = Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(5.dp),
+            verticalArrangement = Arrangement.spacedBy(4.8.dp),
         ) {
             // 行 1：自定义封面
             AppearanceRow(
@@ -257,9 +257,9 @@ fun AppearanceScreen() {
 /**
  * `SubScreen.make_row(title, hint)` 的 Compose 对照。
  *
- * 逐项对齐 `SubScreen.gd:60-118`：最小高 128px→51dp；`card_box(RADIUS_SMALL)`（卡片底 + 发丝边）；
- * 内边距左右 34px→14dp；HBox 间距 18px→7dp；左侧 VBox（标题 `FONT_BODY`/`TEXT`、
- * 提示 `FONT_META`/`TEXT_DIM`，间距 4px→2dp）；右侧值 `FONT_SUB`/`ACCENT`；尾部箭头 **`♪`**
+ * 逐项对齐 `SubScreen.gd:60-118`：最小高 128px→51.2dp；`card_box(RADIUS_SMALL)`（卡片底 + 发丝边）；
+ * 内边距左右 34px→13.6dp；HBox 间距 18px→7.2dp；左侧 VBox（标题 `FONT_BODY`/`TEXT`、
+ * 提示 `FONT_META`/`TEXT_DIM`，间距 4px→1.6dp）；右侧值 `FONT_SUB`/`ACCENT`；尾部箭头 **`♪`**
  * （`FONT_SUB`/`TEXT_DIM`——注意不是 `Components.SettingRow` 用的 `›`）。
  *
  * 用户 m05292 项①之后的两种尾部形态：[value] 非空 = 原来的文字值（动效速度/面板质感），
@@ -278,18 +278,18 @@ private fun AppearanceRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 51.dp)
+            .heightIn(min = 51.2.dp)
             .clip(pullShape(Dims.RADIUS_SMALL))
             .background(c.card)
             .border(1.dp, c.line, pullShape(Dims.RADIUS_SMALL))
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(horizontal = 13.6.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.2.dp),
     ) {
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.spacedBy(1.6.dp),
         ) {
             Text(text = title, color = c.text, fontSize = Typo.BODY.sp)
             if (hint.isNotEmpty()) {

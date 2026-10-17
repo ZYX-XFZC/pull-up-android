@@ -329,7 +329,7 @@ private fun RecentSection(
                     },
                     onLongClick = { shell.showSongActions(song) },
                     // 用户 m05292 项⑥：每行右侧的「+」→ 播放列表选择器 → 加进去并按当前播放模式起播。
-                    onAdd = { shell.addToQueueList(song) },
+                    onAdd = { shell.addToQueue(song) },
                 )
             }
         }
@@ -400,7 +400,7 @@ private fun LocalSection(
                     onLongClick = { shell.showSongActions(song) },
                     // 本地曲目 id 为负，`Playlists.addSong` 会按原版口径拒收并给出中文原因，
                     // 所以这里照常给「+」——按钮在，反馈也在，不是死按钮。
-                    onAdd = { shell.addToQueueList(song) },
+                    onAdd = { shell.addToQueue(song) },
                 )
             }
         }

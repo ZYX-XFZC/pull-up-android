@@ -1,4 +1,4 @@
-﻿package com.pullup.player.ui.screens
+package com.pullup.player.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -33,6 +33,7 @@ import com.pullup.player.data.Track
 import com.pullup.player.ui.LocalApp
 import com.pullup.player.ui.LocalShell
 import com.pullup.player.ui.components.ActionButton
+import com.pullup.player.ui.components.DetailQueueBar
 import com.pullup.player.ui.components.MessageCard
 import com.pullup.player.ui.components.PlaylistTile
 import com.pullup.player.ui.components.RoundIconButton
@@ -248,7 +249,7 @@ fun ArtistScreen(song: Track) {
                     },
                     onLongClick = { shell.showSongActions(track) },
                     // 用户 m05292 项⑥：每行右侧的「+」→ 播放列表选择器 → 加进去并按当前播放模式起播。
-                    onAdd = { shell.addToQueueList(track) },
+                    onAdd = { shell.addToQueue(track) },
                 )
             }
 
@@ -259,5 +260,10 @@ fun ArtistScreen(song: Track) {
                 }
             }
         }
+
+        // ---- 贴底入口条：播放队列（原版 `UIFactory.gd:438-480 _build_detail_bar()`）----
+        // 原版三个详情页（歌单/专辑/歌手）各挂一条，塞进迷你条让位后露出的那 200px 空白里。
+        // Kotlin 侧放在列表下方，功能等价：高 48dp、圆角矩形、点进队列页。
+        DetailQueueBar(onClick = { shell.openQueue() })
     }
 }

@@ -5,7 +5,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -14,6 +13,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -84,7 +86,9 @@ import com.pullup.player.ui.theme.Dims
 import com.pullup.player.ui.theme.Motion
 import com.pullup.player.ui.theme.PullTheme
 import com.pullup.player.ui.theme.Typo
+import com.pullup.player.ui.theme.dampEasing
 import com.pullup.player.ui.theme.pullShape
+import com.pullup.player.ui.theme.rememberPressScale
 import kotlin.math.abs
 import kotlin.math.sin
 import kotlinx.coroutines.delay
@@ -248,10 +252,14 @@ fun PlayerPage(onClose: () -> Unit) {
     // 拖动结束后才真正 seek；拖动中用本地值，听用户的。
     // 没在拖时进度条平滑跟随（原版 `Motion.damp(..., 14.0)`，`PlayerPage.gd:260-265`）——
     // 位置每 250ms 才来一次，直接贴上去会一格一格跳。
+    //
+    // 曲线用 `dampEasing(14.0, 250)`：原版是每帧推进一次的临界阻尼弹簧递推
+    // （`Motion.gd:51-58`），它的连续解就是 `1 - (1+ωt)·e^(-ωt)`，`dampEasing` 正是这条
+    // 按 250ms 归一化后的 Easing。原先这里用 `LinearEasing`，匀速追上去的手感和原版不同。
     val rawFraction = if (duration > 0) position.toFloat() / duration.toFloat() else 0f
     val followedFraction by animateFloatAsState(
         targetValue = rawFraction,
-        animationSpec = tween(PROGRESS_FOLLOW_MS, easing = LinearEasing),
+        animationSpec = tween(PROGRESS_FOLLOW_MS, easing = progressFollowEasing),
         label = "progressFollow",
     )
     val fraction = if (seeking) seekFraction else followedFraction
@@ -476,6 +484,12 @@ fun PlayerPage(onClose: () -> Unit) {
                         )
                     }
                     Spacer(Modifier.weight(1f))
+                    // 播放队列入口（用户 m06483/m06486「播放列表在哪？」）：贴在这一行的右端。
+                    // 放这里而不是控制行 —— 控制行可用宽 984px，现有 5 颗已经占 866px，再塞一颗
+                    // 会挤得播放键不再居中（`PlayerPage.gd:550-554` 的注释记的就是这个坑）。
+                    // 原版 `_make_transport(TransportButton.Shape.QUEUE, 120, _open_queue)`：
+                    // 120px = 48dp、flat（不套深色圆）。
+                    QueueButton(onClick = { shell.openQueue() })
                 }
 
                 PlayerSlider(
@@ -520,12 +534,21 @@ fun PlayerPage(onClose: () -> Unit) {
                     onClick = { app.playback.playPrevious() },
                 )
                 // 唯一胶囊主按钮（用户 m01292）：190px = 76dp 正方 ⇒ 胶囊圆角在这里就是正圆。
+                // 按压同样缩到 0.88 再回弹（`TransportButton.gd:41-57`，主播放键就是 `Shape.PLAY`
+                // 的 TransportButton，`PlayerPage.gd:628`）；涟漪关掉，只留缩放。
+                val playInteraction = remember { MutableInteractionSource() }
+                val playPressScale = rememberPressScale(playInteraction)
                 Box(
                     modifier = Modifier
                         .size(PLAY_BUTTON_DP.dp)
+                        .scale(playPressScale)
                         .clip(pullShape(Dims.RADIUS_PILL))
                         .background(c.accent)
-                        .clickable { app.playback.togglePlayPause() }
+                        .clickable(
+                            interactionSource = playInteraction,
+                            indication = null,
+                            onClick = { app.playback.togglePlayPause() },
+                        )
                         .semantics { contentDescription = if (playing) "暂停" else "播放" },
                     contentAlignment = Alignment.Center,
                 ) {
@@ -686,6 +709,15 @@ private const val CHIP_PAD_DP = 16f
 /** 进度条的平滑跟随时长：位置回调节奏（`PlaybackController.kt:76 TICK_MS = 250L`）。 */
 private const val PROGRESS_FOLLOW_MS = 250
 
+/**
+ * 进度条跟随的收敛速度（原版 `PlayerPage.gd:272` `Motion.damp(..., 14.0, delta)`）。
+ * 配 [PROGRESS_FOLLOW_MS] 得到 ωT = 3.5，正好在 250ms 内收敛掉 97%。
+ */
+private const val PROGRESS_FOLLOW_RATE = 14f
+
+/** 进度条跟随曲线：临界阻尼阶跃响应（`ui/theme/MotionCurves.kt` 的 `dampEasing`）。 */
+private val progressFollowEasing = dampEasing(PROGRESS_FOLLOW_RATE, PROGRESS_FOLLOW_MS)
+
 /** 进度条：控件最小高 60px = 24dp、轨道 12px = 4.8dp、旋钮 30px = 12dp（`PlayerPage.gd:545, 566-595`）。 */
 private const val PROGRESS_H_DP = 24f
 private const val TRACK_DP = 4.8f
@@ -702,6 +734,10 @@ private const val PLAY_OPTICAL_NUDGE_DP = 2.19f
 
 /** 顶栏圆钮 118px = 47.2dp（`PlayerPage.gd:373`）。 */
 private const val TOP_BUTTON_DP = 47.2f
+
+/** 播放队列入口钮 120px = 48dp（`PlayerPage.gd:555`）；图标半宽占短边 0.34（`TransportButton.gd:27`）。 */
+private const val QUEUE_BUTTON_DP = 48f
+private const val QUEUE_GLYPH_RATIO = 0.34f
 
 /** 设置弹层：left −680 / top 180 / right −48 ⇒ 宽 632px = 252.8dp、距顶 72dp、距右 19.2dp（`PlayerPage.gd:640-646`）。 */
 private const val POPUP_W_DP = 252.8f
@@ -901,7 +937,14 @@ private fun PlayerSlider(
     }
 }
 
-/** 次级控制钮：只画图标、不套深色圆（`flat = true`，套上会显得笨重）。图标占短边 0.72。 */
+/**
+ * 次级控制钮：只画图标、不套深色圆（`flat = true`，套上会显得笨重）。图标占短边 0.72。
+ *
+ * 按压缩放（`TransportButton.gd:41-57`）：原版这些钮全是 `TransportButton` 实例，
+ * 按下缩到 0.88、松开回弹 —— 所以这里也走 [rememberPressScale]，
+ * 并且用 `indication = null` 关掉 Material 涟漪（原版 `flat` 钮没有涟漪层，
+ * 两种反馈同时出现会互相打架）。
+ */
 @Composable
 private fun TransportIcon(
     icon: String,
@@ -910,11 +953,18 @@ private fun TransportIcon(
     size: Float,
     onClick: () -> Unit,
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressScale = rememberPressScale(interaction)
     Box(
         modifier = Modifier
             .size(size.dp)
+            .scale(pressScale)
             .clip(CircleShape)
-            .clickable(onClick = onClick)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+            )
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
@@ -926,16 +976,32 @@ private fun TransportIcon(
     }
 }
 
-/** 顶栏圆底图标钮：`button_box(SURFACE)`，图标占短边 0.72（`PlayerPage.gd:372-380`）。 */
+/** 顶栏图标钮：`button_box(SURFACE)`，图标占短边 0.72（`PlayerPage.gd:372-380`）。
+ *
+ * 形状**不是正圆**：`PlayerPage.gd:383` 用的是 `AppTheme.button_box()`，而它返回
+ * `panel_box(color, RADIUS_SMALL)` —— `RADIUS_SMALL = 32` px ⇒ 32÷2.5 = **12.8dp 圆角方块**。
+ * 原版函数名叫 `_make_round_button`（`:381`），但「round」指的是 96px 级别的圆底，
+ * 落到画布上就是圆角矩形；全站「胶囊只留给播放键」的规矩也是这条（用户 m01292）。
+ *
+ * 按压缩放：`_make_round_button` 内部建的是 `TransportButton`（`PlayerPage.gd:341-342`），
+ * 所以和传输钮一样缩到 0.88 再回弹；涟漪关掉只留缩放。
+ */
 @Composable
 private fun TopRoundButton(icon: String, description: String, onClick: () -> Unit) {
     val c = PullTheme.colors
+    val interaction = remember { MutableInteractionSource() }
+    val pressScale = rememberPressScale(interaction)
     Box(
         modifier = Modifier
             .size(TOP_BUTTON_DP.dp)
-            .clip(CircleShape)
+            .scale(pressScale)
+            .clip(RoundedCornerShape(TOP_BUTTON_RADIUS_DP.dp))
             .background(c.surface)
-            .clickable(onClick = onClick)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+            )
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
@@ -944,6 +1010,65 @@ private fun TopRoundButton(icon: String, description: String, onClick: () -> Uni
             color = c.text,
             modifier = Modifier.size((TOP_BUTTON_DP * GLYPH_RATIO).dp),
         )
+    }
+}
+
+/** 顶栏图标钮的圆角：`AppTheme.RADIUS_SMALL = 32` px ÷ 2.5 = 12.8dp（`AppTheme.gd:78`）。 */
+private const val TOP_BUTTON_RADIUS_DP = 12.8f
+
+/**
+ * 播放队列入口钮（原版 `TransportButton.Shape.QUEUE`，`TransportButton.gd:143-152 _draw_queue()`）。
+ *
+ * **手绘而不是图标集**：`_texture_name()` 不认 `Shape.QUEUE`（回空串），
+ * 且 `res/drawable-nodpi/` 里本来就没有 `queue.png` —— 原版因此必须手绘，
+ * 这里照抄同样的画法：三条横线 + 左侧圆点，读起来是「列表」而不是「更多」。
+ *
+ * 几何（原版 `_draw()` 的 `half := minf(size.x, size.y) * GLYPH_RATIO`，
+ * `GLYPH_RATIO := 0.34` 是**半宽**比例）：
+ * - `dot_r   = half * 0.16`
+ * - `line_h  = half * 0.20`
+ * - `dot_x   = center.x - half * 0.78`
+ * - `line_x0 = center.x - half * 0.34`，`line_x1 = center.x + half * 0.92`
+ * - 第 i 根的 `y = center.y + (i - 1) * half * 0.68`（i = 0..2）
+ *
+ * 按钮本身 120px = **48dp**、flat（不套深色圆）。按下换强调色的做法沿用本页其它图标钮。
+ */
+@Composable
+private fun QueueButton(onClick: () -> Unit) {
+    val c = PullTheme.colors
+    Box(
+        modifier = Modifier
+            .size(QUEUE_BUTTON_DP.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = "播放列表" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val side = minOf(size.width, size.height)
+            // GLYPH_RATIO 是半宽比例（`TransportButton.gd:27`），不是图标边长比例。
+            val half = side * QUEUE_GLYPH_RATIO
+            val cx = size.width * 0.5f
+            val cy = size.height * 0.5f
+
+            val dotR = half * 0.16f
+            val lineH = half * 0.20f
+            val dotX = cx - half * 0.78f
+            val lineX0 = cx - half * 0.34f
+            val lineX1 = cx + half * 0.92f
+
+            for (i in 0..2) {
+                val y = cy + (i - 1f) * half * 0.68f
+                // 圆点
+                drawCircle(color = c.text, radius = dotR, center = Offset(dotX, y))
+                // 横线（原版 draw_rect 的 y 是以中心对齐的左上角）
+                drawRect(
+                    color = c.text,
+                    topLeft = Offset(lineX0, y - lineH * 0.5f),
+                    size = Size(lineX1 - lineX0, lineH),
+                )
+            }
+        }
     }
 }
 

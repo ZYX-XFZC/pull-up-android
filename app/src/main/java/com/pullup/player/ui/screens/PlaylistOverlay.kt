@@ -1,4 +1,4 @@
-﻿package com.pullup.player.ui.screens
+package com.pullup.player.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +29,7 @@ import com.pullup.player.data.Track
 import com.pullup.player.ui.LocalApp
 import com.pullup.player.ui.LocalShell
 import com.pullup.player.ui.components.ActionButton
+import com.pullup.player.ui.components.DetailQueueBar
 import com.pullup.player.ui.components.MessageCard
 import com.pullup.player.ui.components.RoundIconButton
 import com.pullup.player.ui.components.SongRow
@@ -202,11 +203,15 @@ fun PlaylistOverlay(playlistId: String) {
                             onClick = { playAndOpen(song, songs) },
                             onLongClick = { shell.showSongActions(song) },
                             // 用户 m05292 项⑥：每行右侧的「+」→ 播放列表选择器 → 加进去并按当前播放模式起播。
-                            onAdd = { shell.addToQueueList(song) },
+                            onAdd = { shell.addToQueue(song) },
                         )
                     }
                 }
             }
         }
+
+        // ---- 贴底入口条：播放队列（原版 `UIFactory.gd:438-480 _build_detail_bar()`）----
+        // 歌单详情页是原版那条「大片空白」的发现现场（用户 m06483/m06486 的截图就停在这一页）。
+        DetailQueueBar(onClick = { shell.openQueue() })
     }
 }

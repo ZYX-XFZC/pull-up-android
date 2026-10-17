@@ -61,6 +61,13 @@ import kotlinx.coroutines.launch
 /** 输入防抖：停手 280ms 才真正发请求（原版 `_debounce.wait_time = 0.28`）。 */
 private const val DEBOUNCE_MS = 280L
 
+/**
+ * 一次取多少条搜索结果（`SearchScreen.gd:14 const SEARCH_LIMIT := 100`）。
+ * 原版注释：「实测 MeTing 支持100；原来写30，用户反馈『结果太少』」。
+ * Kotlin 侧原先没传这个参数，吃了 `MusicApi.search` 的默认值 30，所以只出 30 条。
+ */
+private const val SEARCH_LIMIT = 100
+
 /** `Content` 上边距 72px（`SearchScreen.gd:64`）⇒ 29dp；左右走 `Dims.PAD_SCREEN`，
  *  下边距原版是 −366px（给迷你条 + 底栏让位），Kotlin 侧由外壳承担，页面里不再补。 */
 private const val CONTENT_TOP_DP = 29
@@ -94,12 +101,20 @@ private const val CLEAR_ALL_HEIGHT_DP = 28
 private const val BUTTON_PAD_H_DP = 12
 private const val BUTTON_PAD_V_DP = 7
 
-/** 专辑卡（`make_playlist_card`）高 192px、封面 152px（`UIFactory.gd:140-141`）⇒ 77 / 61dp；
- *  行内边距 14px（`UIFactory.gd:702`）⇒ 6dp，行内间距 24px（`:707`）⇒ 10dp。 */
-private const val ALBUM_ROW_MIN_HEIGHT_DP = 77
-private const val ALBUM_ART_DP = 61
-private const val ROW_PAD_DP = 6
-private const val ROW_INNER_GAP_DP = 10
+/**
+ * 专辑卡（原版 `UIFactory.gd:510-522 make_playlist_card` → `:878-885 _make_row`）：
+ * 高 `PLAYLIST_HEIGHT := 192.0`（`UIFactory.gd:161`）⇒ **76.8dp**、
+ * 封面 `PLAYLIST_ART := 152.0`（`UIFactory.gd:162`）⇒ **60.8dp**；
+ * 行内边距 `_full_rect_margin(14)`（`UIFactory.gd:900`）⇒ **5.6dp**、
+ * 行内间距 `separation 24`（`UIFactory.gd:905`）⇒ **9.6dp**。
+ *
+ * 注意：这里原先是 77 / 61 / 6 / 10 的取整值，且注释把行号写成了 `:140-141`/`:702`/`:707`
+ * （那是另一组常量），已按实际行号改正。
+ */
+private const val ALBUM_ROW_MIN_HEIGHT_DP = 76.8f
+private const val ALBUM_ART_DP = 60.8f
+private const val ROW_PAD_DP = 5.6f
+private const val ROW_INNER_GAP_DP = 9.6f
 
 /**
  * 搜索页（从首页推入的整页，`page = 1`）。移植自 Godot 版 `scripts/ui/SearchScreen.gd`。
@@ -152,7 +167,8 @@ fun SearchScreen() {
         app.searchHistory.remember(k)
         loading = true
         error = null
-        val outcome = app.api.search(k)
+        // 条数与原版一致取 100（`SearchScreen.gd:168` 传的是 SEARCH_LIMIT，不是默认的 30）。
+        val outcome = app.api.search(k, SEARCH_LIMIT)
         // 迟到的回包：用户已经改了关键词，直接丢掉，别覆盖当前结果（原版 `_on_search_completed`）。
         if (keyword.trim() != lastKeyword) return
         outcome.fold(
@@ -274,7 +290,7 @@ fun SearchScreen() {
                             },
                             onLongClick = { shell.showSongActions(song) },
                             // 用户 m05292 项⑥：每行右侧的「+」→ 播放列表选择器 → 加进去并按当前播放模式起播。
-                            onAdd = { shell.addToQueueList(song) },
+                            onAdd = { shell.addToQueue(song) },
                         )
                     }
                 }
@@ -422,10 +438,13 @@ private fun AlbumRow(album: Album, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(ROW_INNER_GAP_DP.dp),
     ) {
-        Cover(url = album.cover, size = ALBUM_ART_DP)
+        // 封面圆角照原版 `UIFactory.gd:171 ART_RADIUS := 10`（10÷2.5 = 4dp）——
+        // 不传就落到 `Dims.RADIUS_SMALL` 的 13dp，方块几乎被削成圆片。
+        Cover(url = album.cover, size = ALBUM_ART_DP, corner = 4)
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(3.dp),
+            // 两行文字行距 8px（`UIFactory.gd:923` separation 8）⇒ 3.2dp。
+            verticalArrangement = Arrangement.spacedBy(3.2.dp),
         ) {
             Text(
                 text = album.name,
